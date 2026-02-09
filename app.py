@@ -97,9 +97,9 @@ if uploaded_file and api_key:
                     tmp_path = tmp_file.name
 
                 processor = PDFProcessor(tmp_path)
-                model_name = 'gemini-1.5-flash' if "Flash" in model_choice else 'gemini-1.5-pro'
+                # Use '-latest' or '-002' for better compatibility in some environments
+                model_name = 'gemini-1.5-flash-latest' if "Flash" in model_choice else 'gemini-1.5-pro-latest'
                 
-                # 가독성과 안정성을 위해 LLM 서비스 초기화 방식 개선
                 llm = LLMService(api_key=api_key)
                 import google.generativeai as genai
                 llm.model = genai.GenerativeModel(model_name)

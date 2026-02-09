@@ -29,8 +29,16 @@ class LLMService:
         Text to Translate:
         {text}
         """
-        response = self.model.generate_content(prompt)
-        return response.text
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            if "404" in str(e):
+                # Fallback to a different model naming convention if 404 occurs
+                fallback_model = genai.GenerativeModel('gemini-1.5-flash')
+                response = fallback_model.generate_content(prompt)
+                return response.text
+            raise e
 
     def summarize_text(self, text):
         prompt = f"""
@@ -46,8 +54,15 @@ class LLMService:
         Document Content:
         {text}
         """
-        response = self.model.generate_content(prompt)
-        return response.text
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            if "404" in str(e):
+                fallback_model = genai.GenerativeModel('gemini-1.5-flash')
+                response = fallback_model.generate_content(prompt)
+                return response.text
+            raise e
 
     def process_large_document(self, text, task_type="translate"):
         # Large context support (Gemini 1.5 supports up to 1M+ tokens)
