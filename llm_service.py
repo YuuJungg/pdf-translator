@@ -5,14 +5,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class LLMService:
-    def __init__(self, api_key=None):
+    def __init__(self, api_key=None, model_name='gemini-1.5-flash-002'):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("Google API Key is required.")
         self.genai = genai
         self.genai.configure(api_key=self.api_key)
         # Default model
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        try:
+            self.model = self.genai.GenerativeModel(model_name)
+        except:
+            self.model = self.genai.GenerativeModel('gemini-1.5-flash')
 
     def _generate_with_fallback(self, prompt):
         # 1. 현재 설정된 모델로 시도

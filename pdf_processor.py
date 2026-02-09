@@ -14,16 +14,20 @@ class PDFProcessor:
             print(f"Error opening PDF: {e}")
             return False
 
-    def extract_text(self):
+    def extract_text_by_pages(self):
         if not self.doc:
             if not self.open_pdf():
-                return ""
+                return []
         
-        full_text = ""
+        pages_content = []
         for page in self.doc:
-            full_text += page.get_text() + "\n--- PAGE BREAK ---\n"
+            pages_content.append(page.get_text())
         
-        return full_text
+        return pages_content
+
+    def extract_text(self):
+        pages = self.extract_text_by_pages()
+        return "\n--- PAGE BREAK ---\n".join(pages)
 
     def get_page_count(self):
         if not self.doc:
