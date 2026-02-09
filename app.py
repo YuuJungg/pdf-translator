@@ -26,7 +26,15 @@ if os.path.exists("styles.css"):
 with st.sidebar:
     st.markdown("<h2 style='text-align: center;'>🔮 AI Settings</h2>", unsafe_allow_html=True)
     st.markdown("---")
-    api_key = st.text_input("Enter your Gemini API Key", type="password", help="Get your key at https://aistudio.google.com/app/apikey")
+    
+    # Check for API key in secrets for auto-fill
+    default_key = st.secrets.get("GOOGLE_API_KEY", "")
+    api_key = st.text_input(
+        "Enter your Gemini API Key", 
+        value=default_key,
+        type="password", 
+        help="Get your key at https://aistudio.google.com/app/apikey"
+    )
     
     st.markdown("### Model Preference")
     model_choice = st.selectbox("Select AI Model", ["Gemini 1.5 Flash (Fast)", "Gemini 1.5 Pro (Precision)"])
