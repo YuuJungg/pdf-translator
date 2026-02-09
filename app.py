@@ -78,70 +78,94 @@ if not st.session_state.get('processed', False):
 st.markdown("---")
 
 # Main Action Area
-uploaded_file = st.file_uploader("", type=["pdf"])
+uploaded_file = st.file_uploader("Upload English PDF", type=["pdf"], label_visibility="collapsed")
 
 if uploaded_file and api_key:
     st.markdown(f"<div class='status-badge'>File ready: {uploaded_file.name}</div>", unsafe_allow_html=True)
     
     if st.button("Generate Professional Insights"):
-        with st.container():
             try:
-                progress_bar = st.progress(0)
+                main_progress = st.progress(0, text="Process starting...")
                 status_text = st.empty()
                 
                 status_text.markdown("🔍 **Analyzing PDF structure...**")
-                progress_bar.progress(10)
                 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
                     tmp_file.write(uploaded_file.getvalue())
                     tmp_path = tmp_file.name
 
                 processor = PDFProcessor(tmp_path)
-                # Use a specific stable version for better initial compatibility
                 model_name = 'gemini-1.5-flash-002' if "Flash" in model_choice else 'gemini-1.5-pro-002'
-                
-                llm = LLMService(api_key=api_key)
-                import google.generativeai as genai
-                llm.model = genai.GenerativeModel(model_name)
+                llm = LLMService(api_key=api_key, model_name=model_name)
 
                 page_count = processor.get_page_count()
-                status_text.markdown(f"📖 **Extracting text from {page_count} pages...**")
-                full_text = processor.extract_text()
-                progress_bar.progress(30)
+                status_text.markdown(f"📖 **Reading {page_count} pages...**")
+                pages = processor.extract_text_by_pages()
                 
-                # Use columns for results
+                # CHUNKING LOGIC (10 pages per chunk)
+                chunk_size = 10
+                chunks = [pages[i:i + chunk_size] for i in range(0, len(pages), chunk_size)]
+                total_chunks = len(chunks)
+                
+                translated_chunks = []
+                summary_chunks = []
+                
                 res_col1, res_col2 = st.columns(2)
-                
                 with res_col1:
                     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
                     st.markdown("### 🇰🇷 AI Translation")
                     trans_placeholder = st.empty()
-                    trans_placeholder.info("Applying AI linguistic processing...")
-                    translation = llm.translate_text(full_text)
-                    trans_placeholder.success("Translation Complete")
-                    st.download_button("Download Translation (.md)", translation, "translation.md", "text/markdown")
                     st.markdown("</div>", unsafe_allow_html=True)
-                
-                progress_bar.progress(70)
                 
                 with res_col2:
                     st.markdown("<div class='glass-card'>", unsafe_allow_html=True)
                     st.markdown("### 📝 Executive Summary")
                     sum_placeholder = st.empty()
-                    sum_placeholder.info("Contextualizing core value...")
-                    summary = llm.summarize_text(full_text)
-                    sum_placeholder.success("Summary Complete")
-                    st.download_button("Download Summary (.md)", summary, "summary.md", "text/markdown")
                     st.markdown("</div>", unsafe_allow_html=True)
+
+                for idx, chunk in enumerate(chunks):
+                    chunk_text = "\n\n".join(chunk)
+                    current_progress = (idx / total_chunks)
+                    main_progress.progress(current_progress, text=f"Processing segments ({idx+1}/{total_chunks})...")
+                    
+                    # Parallel or Sequential processing
+                    status_text.markdown(f"🧠 **AI working on segment {idx+1} of {total_chunks}...**")
+                    
+                    chunk_trans = llm.translate_text(chunk_text)
+                    translated_chunks.append(chunk_trans)
+                    trans_placeholder.info(f"Progress: {int((idx+1)/total_chunks*100)}% translated")
+                    
+                    chunk_sum = llm.summarize_text(chunk_text)
+                    summary_chunks.append(chunk_sum)
+                    sum_placeholder.info(f"Progress: {int((idx+1)/total_chunks*100)}% summarized")
+
+                main_progress.progress(1.0, text="Processing complete!")
                 
-                progress_bar.progress(100)
-                status_text.markdown("✨ **All insights generated successfully!**")
+                # Combine results
+                final_translation = "\n\n".join(translated_chunks)
+                # For summary, we might want a final summary of summaries if it's too long
+                if len(summary_chunks) > 1:
+                    status_text.markdown("🎯 **Synthesizing final executive summary...**")
+                    final_summary = llm.summarize_text("\n\n".join(summary_chunks))
+                else:
+                    final_summary = summary_chunks[0]
+
+                trans_placeholder.success("Translation Complete")
+                with res_col1:
+                    st.download_button("Download Translation (.md)", final_translation, "translation.md", "text/markdown", key="dl_trans")
+                
+                sum_placeholder.success("Summary Complete")
+                with res_col2:
+                    st.download_button("Download Summary (.md)", final_summary, "summary.md", "text/markdown", key="dl_sum")
+                
+                status_text.markdown("✨ **Your professional insights are ready below.**")
                 
                 processor.close()
                 os.unlink(tmp_path)
 
             except Exception as e:
                 st.error(f"Error during processing: {e}")
+                st.info("Tip: If you see a '404' error, try clicking 'Reboot app' in the Manage menu.")
                 
 elif not api_key and uploaded_file:
     st.warning("Please enter your API Key in the sidebar to proceed.")

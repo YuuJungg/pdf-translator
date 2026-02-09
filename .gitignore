@@ -1,0 +1,10 @@
+.git/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+*.command
+Dockerfile
+.venv/
+env/
+venv/
