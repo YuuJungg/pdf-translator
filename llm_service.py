@@ -14,6 +14,34 @@ class LLMService:
         # Default model
         self.model = genai.GenerativeModel('gemini-1.5-flash')
 
+    def _generate_with_fallback(self, prompt):
+        # 1. 현재 설정된 모델로 시도
+        try:
+            return self.model.generate_content(prompt).text
+        except Exception as e:
+            # 404 에러 발생 시 동적으로 사용 가능한 모델을 탐색합니다.
+            if "404" in str(e) or "not found" in str(e).lower():
+                try:
+                    # 현재 계정에서 지원하는 모든 모델 목록을 가져옵니다.
+                    available_models = [
+                        m.name for m in self.genai.list_models() 
+                        if 'generateContent' in m.supported_generation_methods
+                    ]
+                    
+                    # 우선순위에 따라 모델 매칭 시도
+                    priority_keywords = ['flash-002', 'flash', 'pro-002', 'pro']
+                    for keyword in priority_keywords:
+                        for model_path in available_models:
+                            if keyword in model_path.lower():
+                                try:
+                                    temp_model = self.genai.GenerativeModel(model_path)
+                                    return temp_model.generate_content(prompt).text
+                                except:
+                                    continue
+                except:
+                    pass
+            raise e
+
     def translate_text(self, text):
         prompt = f"""
         Role: Senior Liaison Interpreter & Technical Translator
@@ -29,16 +57,7 @@ class LLMService:
         Text to Translate:
         {text}
         """
-        try:
-            response = self.model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            if "404" in str(e):
-                # Fallback to a different model naming convention if 404 occurs
-                fallback_model = genai.GenerativeModel('gemini-1.5-flash')
-                response = fallback_model.generate_content(prompt)
-                return response.text
-            raise e
+        return self._generate_with_fallback(prompt)
 
     def summarize_text(self, text):
         prompt = f"""
@@ -54,15 +73,7 @@ class LLMService:
         Document Content:
         {text}
         """
-        try:
-            response = self.model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            if "404" in str(e):
-                fallback_model = genai.GenerativeModel('gemini-1.5-flash')
-                response = fallback_model.generate_content(prompt)
-                return response.text
-            raise e
+        return self._generate_with_fallback(prompt)
 
     def process_large_document(self, text, task_type="translate"):
         # Large context support (Gemini 1.5 supports up to 1M+ tokens)
