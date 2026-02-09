@@ -1,49 +1,88 @@
-import google.generativeai as genai
+from google import genai
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class LLMService:
-    def __init__(self, api_key=None, model_name='gemini-1.5-flash-002'):
+    def __init__(self, api_key=None, model_name=None):
         self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if not self.api_key:
             raise ValueError("Google API Key is required.")
-        self.genai = genai
-        self.genai.configure(api_key=self.api_key)
-        # Default model
-        try:
-            self.model = self.genai.GenerativeModel(model_name)
-        except:
-            self.model = self.genai.GenerativeModel('gemini-1.5-flash')
 
-    def _generate_with_fallback(self, prompt):
-        # 1. 현재 설정된 모델로 시도
+        self.client = genai.Client(api_key=self.api_key)
+
+        # ✅ 기본 모델 하드코딩 지양: 가능하면 자동 선택
+        self.default_model = model_name or self._pick_default_model()
+
+    def _pick_default_model(self) -> str:
+        """
+        현재 API에서 사용 가능한 모델 중
+        generateContent 지원하는 모델만 추려서
+        Flash 우선 → Pro 차선으로 선택
+        """
         try:
-            return self.model.generate_content(prompt).text
-        except Exception as e:
-            # 404 에러 발생 시 동적으로 사용 가능한 모델을 탐색합니다.
-            if "404" in str(e) or "not found" in str(e).lower():
-                try:
-                    # 현재 계정에서 지원하는 모든 모델 목록을 가져옵니다.
-                    available_models = [
-                        m.name for m in self.genai.list_models() 
-                        if 'generateContent' in m.supported_generation_methods
-                    ]
-                    
-                    # 우선순위에 따라 모델 매칭 시도
-                    priority_keywords = ['flash-002', 'flash', 'pro-002', 'pro']
-                    for keyword in priority_keywords:
-                        for model_path in available_models:
-                            if keyword in model_path.lower():
-                                try:
-                                    temp_model = self.genai.GenerativeModel(model_path)
-                                    return temp_model.generate_content(prompt).text
-                                except:
-                                    continue
-                except:
-                    pass
-            raise e
+            models = list(self.client.models.list())
+
+            # generateContent 지원 모델만
+            candidates = []
+            for m in models:
+                name = getattr(m, "name", "") or ""
+                methods = getattr(m, "supported_generation_methods", None) or []
+                if "generateContent" in methods and "gemini" in name.lower():
+                    # Strip 'models/' prefix if present
+                    clean_name = name.replace("models/", "")
+                    candidates.append(clean_name)
+
+            if not candidates:
+                return "gemini-1.5-flash" # Safe fallback
+
+            # 선호도: flash 계열 우선, 그 다음 pro
+            preferred_keywords = ["flash", "pro"]
+            for kw in preferred_keywords:
+                for name in candidates:
+                    if kw in name.lower():
+                        return name
+
+            # 그래도 없으면 첫 번째
+            return candidates[0]
+        except:
+            return "gemini-1.5-flash" # Final safety net
+
+    def _generate_with_fallback(self, prompt: str) -> str:
+        # ✅ 후보를 “가볍게”만 두고, 1순위는 자동 선택된 default_model
+        model_candidates = [
+            self.default_model,
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ]
+
+        last_error = None
+        for model_name in model_candidates:
+            if not model_name:
+                continue
+            try:
+                resp = self.client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                return resp.text
+            except Exception as e:
+                last_error = e
+                msg = str(e).lower()
+
+                # 권한 문제면 즉시 종료
+                if "403" in msg or "permission_denied" in msg:
+                    raise
+
+                # 모델명/지원메서드 문제면 다음 후보로
+                if "404" in msg or "not found" in msg or "supported" in msg:
+                    continue
+
+                # 그 외(네트워크 등)는 바로 터뜨리기
+                raise
+
+        raise last_error or RuntimeError("No valid models found to process the request.")
 
     def translate_text(self, text):
         prompt = f"""
@@ -77,14 +116,3 @@ class LLMService:
         {text}
         """
         return self._generate_with_fallback(prompt)
-
-    def process_large_document(self, text, task_type="translate"):
-        # Large context support (Gemini 1.5 supports up to 1M+ tokens)
-        # For extremely large files, we might still need chunking, 
-        # but for 100-200 pages, we can try larger chunks or single pass if it fits.
-        # Here we'll implement a simple split logic if token count is very high.
-        
-        if task_type == "translate":
-            return self.translate_text(text)
-        else:
-            return self.summarize_text(text)
