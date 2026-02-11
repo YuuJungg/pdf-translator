@@ -1,6 +1,7 @@
 from google import genai
 import os
 from dotenv import load_dotenv
+import time
 
 load_dotenv()
 
@@ -11,78 +12,104 @@ class LLMService:
             raise ValueError("Google API Key is required.")
 
         self.client = genai.Client(api_key=self.api_key)
-
-        # ✅ 기본 모델 하드코딩 지양: 가능하면 자동 선택
+        
+        # ✅ Try to pick the best model dynamically, or use a provided hint
         self.default_model = model_name or self._pick_default_model()
+        print(f"DEBUG: Initialized with model: {self.default_model}")
 
     def _pick_default_model(self) -> str:
         """
-        현재 API에서 사용 가능한 모델 중
-        generateContent 지원하는 모델만 추려서
-        Flash 우선 → Pro 차선으로 선택
+        현재 API 키로 접근 가능한 최적의 모델을 동적으로 탐색합니다.
+        Flash 우선 -> Pro 차선
         """
         try:
             models = list(self.client.models.list())
-
-            # generateContent 지원 모델만
+            
+            # generateContent를 지원하는 Gemini 모델만 필터링
             candidates = []
             for m in models:
-                name = getattr(m, "name", "") or ""
-                methods = getattr(m, "supported_generation_methods", None) or []
+                name = m.name # This is usually 'models/gemini-...'
+                methods = m.supported_generation_methods or []
                 if "generateContent" in methods and "gemini" in name.lower():
-                    # Strip 'models/' prefix if present
-                    clean_name = name.replace("models/", "")
-                    candidates.append(clean_name)
+                    candidates.append(name)
 
             if not candidates:
-                return "gemini-1.5-flash" # Safe fallback
+                # 최후의 보루: 가장 널리 쓰이는 이름 시도
+                return "gemini-1.5-flash-latest"
 
-            # 선호도: flash 계열 우선, 그 다음 pro
-            preferred_keywords = ["flash", "pro"]
-            for kw in preferred_keywords:
+            # 1순위: Flash (속도와 비용 면에서 유리)
+            for kw in ["flash-latest", "flash-002", "flash"]:
+                for name in candidates:
+                    if kw in name.lower():
+                        return name
+            
+            # 2순위: Pro (정밀도)
+            for kw in ["pro-latest", "pro-002", "pro"]:
                 for name in candidates:
                     if kw in name.lower():
                         return name
 
-            # 그래도 없으면 첫 번째
             return candidates[0]
-        except:
-            return "gemini-1.5-flash" # Final safety net
+        except Exception as e:
+            print(f"DEBUG: Model auto-discovery failed: {e}")
+            return "gemini-1.5-flash-latest"
 
     def _generate_with_fallback(self, prompt: str) -> str:
-        # ✅ 후보를 “가볍게”만 두고, 1순위는 자동 선택된 default_model
+        """
+        여러 모델 후보를 순차적으로 시도하며 404 에러를 방지합니다.
+        """
+        # 후보군 구성 (최신 별칭 우선)
         model_candidates = [
             self.default_model,
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro-latest",
             "gemini-1.5-flash",
             "gemini-1.5-pro",
+            "gemini-2.0-flash-exp" # 최신 실험버전 시도
         ]
 
+        # 중복 제거 (순서 유지)
+        seen = set()
+        unique_candidates = []
+        for m in model_candidates:
+            if m and m not in seen:
+                unique_candidates.append(m)
+                seen.add(m)
+
         last_error = None
-        for model_name in model_candidates:
-            if not model_name:
-                continue
+        for model_name in unique_candidates:
             try:
                 resp = self.client.models.generate_content(
                     model=model_name,
                     contents=prompt
                 )
+                if not resp.text:
+                    continue
                 return resp.text
             except Exception as e:
                 last_error = e
                 msg = str(e).lower()
-
-                # 권한 문제면 즉시 종료
+                
+                # 심각한 권한 문제면 즉시 중단
                 if "403" in msg or "permission_denied" in msg:
-                    raise
-
-                # 모델명/지원메서드 문제면 다음 후보로
-                if "404" in msg or "not found" in msg or "supported" in msg:
+                    raise e
+                
+                # 404나 지원하지 않는 모델 에러일 경우에만 다음으로 넘어감
+                if any(err in msg for err in ["404", "not_found", "not supported", "not found"]):
+                    print(f"DEBUG: Model {model_name} failed with 404, trying next...")
+                    continue
+                
+                # 할당량 초과(429) 시 잠시 대기 후 시도할 수도 있지만, 여기서는 다음 모델 시도
+                if "429" in msg or "quota" in msg:
+                    time.sleep(1)
                     continue
 
-                # 그 외(네트워크 등)는 바로 터뜨리기
-                raise
+                # 기타 심각한 에러는 바로 터뜨림
+                raise e
 
-        raise last_error or RuntimeError("No valid models found to process the request.")
+        # 모든 모델 실패 시 마지막 에러 보고
+        error_info = f"All model attempts failed. Last error: {last_error}"
+        raise RuntimeError(error_info)
 
     def translate_text(self, text):
         prompt = f"""

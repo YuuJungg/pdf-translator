@@ -125,8 +125,9 @@ if uploaded_file and api_key:
                     tmp_path = tmp_file.name
 
                 processor = PDFProcessor(tmp_path)
-                # Let LLMService handle dynamic model selection to avoid 404 errors
-                llm = LLMService(api_key=api_key)
+                # Pass the user's preference (Flash/Pro) as a hint to the service
+                model_hint = "flash" if "Flash" in model_choice else "pro"
+                llm = LLMService(api_key=api_key, model_name=model_hint)
 
                 page_count = processor.get_page_count()
                 status_text.markdown(f"📖 **Reading {page_count} pages...**")
